@@ -1,0 +1,379 @@
+
+
+
+#!/usr/bin/python
+
+
+# ---------- script info ---------- #
+
+desc="""Search SRAs for sequences given in an FASTA query"""
+
+
+# ---------- import modules ---------- #
+
+import os, sys, shutil, argparse
+from datetime import datetime
+from argparse import ArgumentParser
+import time
+
+
+######################################################################
+######################################################################
+######################################################################
+
+
+# ---------- def functions ---------- #
+## make arge parser for multi line info
+class SmartFormatter(argparse.HelpFormatter):
+    def _split_lines(self, text, width):
+        if text.startswith('R|'):
+            return text[2:].splitlines()
+        return argparse.HelpFormatter._split_lines(self, text, width)
+        
+## time stamp for printing to terminal
+def DTstamp(MESSAGE):
+    now = datetime.now()
+    dt = now.strftime("%H:%M:%S")
+    print(dt+MESSAGE)
+
+## make and check new directories
+def MakeDir(NAME):
+    CURRENT_DIR = os.getcwd()
+    new_path = CURRENT_DIR + "/" + NAME
+    if not os.path.exists(new_path):
+        os.makedirs(new_path)
+    else:
+        shutil.rmtree(new_path)
+        os.makedirs(new_path)
+        
+##  make a results directory specified in options, if not already existing
+def ResultsDIR(NAME):
+    CURRENT_DIR = os.getcwd()
+    results_path = CURRENT_DIR + "/"+ NAME
+    
+
+    # make output dir
+    if not os.path.exists(results_path):
+        os.makedirs(results_path)
+
+    with open(RESULTS_DIR +"/"+ results_name, 'w') as OUT:
+                    OUT.write("phylum \t"+ ",".join(sra_list_to_print)+"\n")
+                    for name, co in phylum_dict.items():
+                        OUT.write('{}\t{}\n'.format(name, ",".join(co)))
+    
+def Ratios (NAME):
+    ratios_file = RESULTS_DIR +"/"+ "results_ratios.txt"
+    if not os.path.exists(ratios_file):
+        with open (ratios_file, "w") as OUT:
+            with open(RESULTS_DIR +"/"+ results_name, 'r') as IN:
+                    total = float(0)
+                    mollusc = float(0)
+                    for line in IN: 
+                        if 'phylum' not in line:
+                            line = (line.split("\t"))
+                            name = line[0]
+                            if name != "Mollusca":
+                                total += float(line[1])
+                            if name == "Mollusca":
+                                mollusc += float(line[1])
+                                total += float(line[1])
+                            
+                                ratio = (mollusc*100)/total
+        
+                                OUT.write("run \t hits_ratio \t gap_extend \t gap open \t penalty \t word_size \n" + results_name + "\t" + str(ratio) + "\t" + GE + "\t" + GO + "\t" + PEN + "\t" + WS + "\n")
+            
+    else:
+        with open (ratios_file, "a") as OUT:
+            with open(RESULTS_DIR +"/"+ results_name, 'r') as IN:
+                    total = float(0)
+                    mollusc = float(0)
+                    for line in IN: 
+                        if 'phylum' not in line:
+                            line = (line.split("\t"))
+                            name = line[0]
+                            if name != "Mollusca":
+                                total += float(line[1])
+                            if name == "Mollusca":
+                                mollusc += float(line[1])
+                                total += float(line[1])
+                            
+                                ratio = (mollusc*100)/total
+        
+                                OUT.write(results_name + "\t" + str(ratio) + "\t" + GE + "\t" + GO + "\t" + PEN + "\t" + WS + "\n")
+   
+##  make a times directory specified in options, if not already existing
+def TimeDIR(NAME):
+    CURRENT_DIR = os.getcwd()
+    time_path = CURRENT_DIR + "/"+ NAME
+    # make output dir
+    if not os.path.exists(time_path):
+        os.makedirs(time_path)
+        
+    if not os.path.exists(TIME_DIR):
+        with open(OUTPUT_DIR+"/" + time_name, 'w') as OUT_time:
+            OUT_time.write("Total_duration" +"\t"+str(time_running) + "\n" + "Blast_duration" +"\t"+str(blast_time) + "\n" + "megahit_translate_duration" +"\t"+str(megahit_translate_time))
+    else:
+        with open(TIME_DIR+"/" + time_name, 'w') as OUT_time:
+            OUT_time.write("Total_duration" +"\t"+str(time_running) + "\n" + "Blast_duration" +"\t"+str(blast_time) + "\n" + "megahit_translate_duration" +"\t"+str(megahit_translate_time))
+    
+    print("The Magic-blast search was finished in " + str(blast_time) + " seconds." )
+    print("Megahit and translation was finished in " + str(megahit_translate_time) + " seconds." )
+    print("The search was finished in " + str(time_running) + " seconds." )
+        
+
+## sam to fastq
+def SamToFastq(OUTPUT_DIR, INPUT_MB, n):
+    os.system("cat "+OUTPUT_DIR+"/header "+OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_OUT.sam > "+OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_OUT_w_header.sam")
+    os.system("samtools view -b "+OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_OUT_w_header.sam > "+OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_OUT.bam")
+    os.system("samtools sort -n "+OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_OUT.bam > "+OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_OUT_sorted.bam")
+    os.system("bamToFastq -i "+OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_OUT_sorted.bam -fq "+OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_reads.fastq")
+    os.remove(OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_OUT.sam")
+    os.remove(OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_OUT_w_header.sam")
+    os.remove(OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_OUT.bam")
+    os.remove(OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_OUT_sorted.bam")
+
+## Translate contige with specific codons
+def TransWithSpecCodon(OUTPUT_DIR, INPUT_MB, n, SPEC_CODON):
+    os.system("TransDecoder.LongOrfs -t "+OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_MEGAHIT_OUT/"+INPUT_MB+"_"+n+".contigs.fa -O "+OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_MEGAHIT_OUT --G "+SPEC_CODON+" 1>> "+OUTPUT_DIR+"/logs/log_transdecoder.txt 2>&1")
+    os.system("tblastn -query "+OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_MEGAHIT_OUT/longest_orfs.pep -db "+OUTPUT_DIR+"/"+FASTA_NAME+"_DB -max_target_seqs 1 -outfmt 6 -evalue 1e-5 -num_threads 10 -out "+OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_MEGAHIT_OUT/blastp.outfmt6 1>> "+OUTPUT_DIR+"/logs/log_blast.txt 2>&1")
+    os.system("TransDecoder.Predict -t "+OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_MEGAHIT_OUT/"+INPUT_MB+"_"+n+".contigs.fa -O "+OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_MEGAHIT_OUT --retain_blastp_hits "+OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_MEGAHIT_OUT/blastp.outfmt6  --G "+SPEC_CODON+" 1>> "+OUTPUT_DIR+"/logs/log_transdecoder.txt 2>&1")
+
+## collect all the phyla names, sort and create dictionary from FASTA
+def BuildPhylaDict(FASTA_DB, PHY_DIC):
+    DTstamp("... Building dictionary")
+    list_o_names = list()
+    with open(FASTA_DB, 'r') as FASTA_IN:
+        for line in FASTA_IN:
+            check = line.startswith('>')
+            if check is True:
+                line = line.split(';')
+                name = line[0]
+                name = name.split('phylum_')
+                name = name[1]
+                name = name.split('_')
+                name = name[0]
+                list_o_names.append(name.strip('\r\n'))
+    list_o_names = set(list_o_names)
+    list_o_names = list(list_o_names)
+    list_o_names.sort()
+
+    # make the dictionary with no values [] to add to later
+    for name in list_o_names:
+        PHY_DIC[str(name)] = []
+ 
+## Count the number of reads and get the scaling factor
+def CountReads(INPUT_MB, T_SCALE):
+    DTstamp("... Counting reads")
+    with open(OUTPUT_DIR+"/"+INPUT_MB+"_OUT.sam", 'r') as MB_IN:
+        entries = list()
+        for line in MB_IN:
+            check = line.startswith('@')
+            if check is False:
+                linex = line.split('\t')
+                name = linex[0]
+                seq = linex[9]
+                entry = name+seq
+                entries.append(entry)
+        global total_reads
+        total_reads = (len(set(entries)))
+        T_SCALE = float(float(total_reads)/1000000)
+        global total_scaling
+        total_scaling = T_SCALE
+        DTstamp("... "+str(total_reads)+" reads counted")
+
+## Count hits per phylum, assemble reads and translate
+def HitsAssTrans(PHY_DICT, INPUT_MB, THRESH):
+    for n in PHY_DICT:
+        count = 0
+        with open(OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_OUT.sam", 'w') as SAM_OUT:
+            with open(OUTPUT_DIR+"/"+INPUT_MB+"_OUT.sam", 'r') as MB_IN:
+                for line in MB_IN:
+                    check = line.startswith('@')
+                    if check is False:
+                        linex = line.split('\t')
+                        name = linex[2]
+                        if str(name) != "*":
+                            name = name.split('phylum_')
+                            name = name[1]
+                            name = name.split('_')
+                            name = name[0]
+                            if name == n:
+                                count += 1
+                                SAM_OUT.write(line)
+                                
+           # if int(float(count)/float(T_SCALE)) >= int(THRESH):
+            #    phylum_dict[n].append(str(float(count)/float(T_SCALE)))
+           # else:
+            #    phylum_dict[n].append(str(0))
+                
+
+        ## remove empty files
+        if os.stat(OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_OUT.sam").st_size == 0:
+            os.remove(OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_OUT.sam")
+        else:
+            ## Combine sam with header, SAM to BAM, sort, BAM to FASTQ (remove intermediates
+            DTstamp("... Extracting reads in "+n)
+            SamToFastq(OUTPUT_DIR, INPUT_MB, n)
+            
+            ## Assemble reads with megahit
+            DTstamp("... Assembling reads in "+n)
+            os.system("megahit -r "+OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_reads.fastq -t 10 -m 0.50 -o "+OUTPUT_DIR+"/"+INPUT_MB+"_"+n+"_MEGAHIT_OUT --min-count 3 --k-list 31,51,71,91,99 --no-mercy --out-prefix "+INPUT_MB+"_"+n+" 1>> "+OUTPUT_DIR+"/logs/log_megahit.txt 2>&1")
+            
+            ## Replace headers in contig fasta files
+            os.system("""sed -i s/">"/">"""+INPUT_MB+"""_"""+n+"""_"/g """+OUTPUT_DIR+"""/"""+INPUT_MB+"_"+n+"_MEGAHIT_OUT/"+INPUT_MB+"_"+n+".contigs.fa")
+              
+            ## Translate congits
+            DTstamp("... Translating "+n+" sequences")
+            if n == "Platyhelminthes":
+                TransWithSpecCodon(OUTPUT_DIR, INPUT_MB, n, "Mitochondrial-Flatworm")
+            elif n != "Platyhelminthes":
+                TransWithSpecCodon(OUTPUT_DIR, INPUT_MB, n, "Mitochondrial-Invertebrates")
+
+
+
+######################################################################
+######################################################################
+######################################################################
+
+
+# ---------- setup | user options ---------- #
+
+parser = argparse.ArgumentParser(description=desc, formatter_class=SmartFormatter)
+optional = parser._action_groups.pop()  #Change order of groups
+required = parser.add_argument_group("Required arguments")
+parser._action_groups.append(optional)
+
+## required arguments
+required.add_argument('-fi', dest='FASTA_DB',
+                      help="Fasta file on query gene. \n"
+                            "needs to contain fasta ID formating as follows.\n"
+                            ">species_phylum_DONTKNOW", required=True)
+                      
+required.add_argument('-sra', dest='SRA_LIST',help='List of SRAs', required=True)
+required.add_argument('-tpm', dest='THRESHOLD', help='Threshold of TPM', required=True)
+required.add_argument('-n', dest='threads', help='Number of threads to use', required=True)
+
+## optional arguments
+optional.add_argument('-O', dest='output', help='output directory name', default= "OUTPUT", required=False)
+optional.add_argument('-w', dest='wordsize', help='word size parameter for magicblast', default=18, required=False)
+optional.add_argument('-p', dest='penalty', help='penalty for mismatch parameter for magicblast', default=-4, required=False)
+optional.add_argument('-o', dest='gapopen', help='gapopen parameter for magicblast', default=0, required=False)
+optional.add_argument('-e', dest='gapextend', help='gapextend parameter for magicblast', default=4, required=False)
+optional.add_argument('-presets', dest='preset', help='preset strings DEVELOPED AFTER SIMULATION', default="18,-4,0,4", required=False)
+optional.add_argument('-c', dest='clean', help='remove intermediate files', action="store_true", required=False)
+optional.add_argument('-r', dest='results', help='creates separate folder for results.txt files',default = "folder_to_store_results", required=False)
+optional.add_argument('-t', dest='time', help='creates a separate folder with time.txt storing the durations of the steps',default = "folder_to_store_times_results", required=False)
+#  optional.add_argument JOKE
+
+input_args = parser.parse_args()
+
+# required inputs
+FASTA_DB = input_args.FASTA_DB
+SRA_LIST = input_args.SRA_LIST
+THRESHOLD = input_args.THRESHOLD
+threads = input_args.threads
+
+# optional inputs
+OUTPUT_DIR = input_args.output
+RESULTS_DIR = input_args.results
+CLEAN = input_args.clean
+TIME_DIR = input_args.time
+
+# magicblast parameters
+WS = str(input_args.wordsize)
+PEN = str(input_args.penalty)
+GO = str(input_args.gapopen)
+GE = str(input_args.gapextend)
+PRE = input_args.preset
+
+
+######################################################################
+######################################################################
+######################################################################
+
+
+# start measuring time running 
+if input_args.time != "folder_to_store_times_results":
+    start_time = time.time()
+
+##############
+
+MakeDir(OUTPUT_DIR)
+MakeDir(OUTPUT_DIR+"/transdecoder_out")
+MakeDir(OUTPUT_DIR+"/logs")
+
+################################
+# make a blast DB
+FASTA_NAME = FASTA_DB.split('/')[-1]
+
+os.system("makeblastdb -in "+FASTA_DB+" -out "+OUTPUT_DIR+"/"+FASTA_NAME+"_DB -parse_seqids -dbtype 'nucl'")
+
+################################
+# make a dictionary of the phylum
+phylum_dict = {}
+BuildPhylaDict(FASTA_DB, phylum_dict)
+
+################################
+# get a list of all the hits and sort to count
+sra_list_to_print = list()
+with open(SRA_LIST, 'r') as SRA_L:
+    for line in SRA_L:
+        MB = line.strip('\n\r')
+        sra_list_to_print.append(MB)
+        DTstamp("..... MBlasting "+MB)
+        
+        ################################
+        # run magicblast on each SRA
+        os.system("magicblast -word_size "+WS+" -gapopen "+GO+" -gapextend "+GE+" -penalty "+PEN+" -splice F -limit_lookup F -sra "+MB+" -db "+OUTPUT_DIR+"/"+FASTA_NAME+"_DB -outfmt sam -num_threads "+threads+" -out "+OUTPUT_DIR+"/"+MB+"_OUT.sam >> "+OUTPUT_DIR+"/logs/log_magicblastdb.txt 2>&1")
+        if input_args.time != "folder_to_store_times_results":
+            blast_time = time.time() - start_time
+        ################################
+        # collect SAM header
+        os.system("samtools view -H "+OUTPUT_DIR+"/"+MB+"_OUT.sam > "+OUTPUT_DIR+"/header")
+        
+        ################################
+        # count reads and get scaling
+        T_SCALE = float()
+        # CountReads(MB, T_SCALE)
+        # if total_reads == 0:
+        #     DTstamp(" WARNING!!....no reads in SAM, skipping "+MB)
+        #     continue
+            
+        ################################
+        # count hits to phylum and append to dictitonary
+        HitsAssTrans(phylum_dict, MB, THRESHOLD)
+        if input_args.time != "folder_to_store_times_results":
+            megahit_translate_time = time.time() - blast_time - start_time
+        ################################
+        # clean up
+        if CLEAN == True:
+            os.system("rm "+OUTPUT_DIR+"/"+MB+"_OUT.sam")
+            os.system("rm -r "+OUTPUT_DIR+"/*MEGAHIT*")
+
+        if input_args.time != "folder_to_store_times_results":
+            time_name = MB + "_ge_" + GE + "_go_" + GO + "_p_" + PEN + "_ws_" + WS + "_time.txt"
+            time_running = time.time() - start_time
+
+            TimeDIR(TIME_DIR)
+################################
+# move transdecoder files and log files to appropriate directories
+os.system("mv *transdecoder* "+OUTPUT_DIR+"/transdecoder_out")
+os.system("mv pipeliner* "+OUTPUT_DIR+"/logs")
+
+################################
+# write out the contents of the dictionary - either in the output directory, or -if specified - in designated results directory 
+#results_name = MB + "_ge_" + GE + "_go_" + GO + "_p_" + PEN + "_ws_" + WS + "_results.txt"
+
+#if input_args.results != "folder_to_store_results":
+#    ResultsDIR(RESULTS_DIR)
+#    Ratios(RESULTS_DIR)
+    
+#else:
+#    with open(OUTPUT_DIR +"/" + results_name, 'w') as OUT:
+#                    OUT.write("phylum \t"+ ",".join(sra_list_to_print)+"\n")
+#                    for name, co in phylum_dict.items():
+#                        OUT.write('{}\t{}\n'.format(name, ",".join(co)))
+
+################################
+
+# stop the time running and store it in a textfile - either in the output directory, or -if specified - in designated times directory       
