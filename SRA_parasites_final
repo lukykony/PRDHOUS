@@ -7,6 +7,7 @@
 # ---------- script info ---------- #
 
 desc="""Search SRAs for sequences given in an FASTA query"""
+# SRA_parasites_final -fi [path/to/database] -sra [path/to/SRAlist] -tpm 1 -n [number of threads] [optional arguments]  #
 
 
 # ---------- import modules ---------- #
